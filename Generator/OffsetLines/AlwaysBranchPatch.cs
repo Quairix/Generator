@@ -15,7 +15,6 @@ namespace Generator.OffsetLines
     class AlwaysBranchPatch : PatchLine
     {
         public Line CalledMethod { get; set; }
-
         public override void FindPatch(ScriptJson scriptJson, Stream il2cpp, Architecture architecture)
         {
             base.FindPatch(scriptJson, il2cpp, architecture);
@@ -48,10 +47,7 @@ namespace Generator.OffsetLines
                     switch (architecture)
                     {
                         case Architecture.ARM:
-                            // Ваш код для ARM архитектуры
-                            break;
-                        case Architecture.ARM64:
-                            using (var disassembler = CapstoneDisassembler.CreateArm64Disassembler(Arm64DisassembleMode.LittleEndian))
+                            using (var disassembler = CapstoneDisassembler.CreateArmDisassembler(ArmDisassembleMode.Arm))
                             {
                                 disassembler.EnableInstructionDetails = true;
                                 do
@@ -59,68 +55,101 @@ namespace Generator.OffsetLines
                                     var pos = il2cpp.Position;
                                     readed += (ulong)il2cpp.Read(buffer, 0, bufferSize);
                                     var instruction = disassembler.Disassemble(buffer, pos).First();
-
-                                    Console.WriteLine($"Disassembled instruction at position {pos}: {instruction.Mnemonic} {instruction.Operand}");
-
-                                    if (instruction.Id == Arm64InstructionId.ARM64_INS_BL)
+                                    if (instruction.Id == ArmInstructionId.ARM_INS_BL)
                                     {
                                         var newPos = instruction.Details.Operands.First().Immediate;
-                                        Console.WriteLine($"Instruction is BL, Operand Immediate is {newPos}");
-
                                         if (newPos == (long)CalledMethod.Offset)
                                         {
+                                            il2cpp.Position += 4;
                                             Offset = (ulong)il2cpp.Position;
                                             il2cpp.Read(buffer, 0, bufferSize);
                                             instruction = disassembler.Disassemble(buffer, (long)Offset).First();
-
-                                            Console.WriteLine($"Next instruction after BL points to CalledMethod.Offset, instruction: {instruction.Mnemonic} {instruction.Operand}");
-                                            Console.WriteLine($"Attempting to assemble branch instruction at Offset {Offset}");
-
-                                            int idx = instruction.Operand.LastIndexOf('#');
-                                            if (idx >= 0)
-                                            {
-                                                var operandSuffix = instruction.Operand.Substring(idx);
-                                                Console.WriteLine($"Operand suffix: {operandSuffix}");
-                                                PatchData = keystone.Assemble($"b {operandSuffix}", Offset).Buffer;
-                                            }
-                                            else
-                                            {
-                                                Console.WriteLine("Error: '#' not found in instruction operand.");
-                                                Console.WriteLine($"Instruction Operand: {instruction.Operand}");
-                                                throw new Exception("Cannot find '#' in instruction operand.");
-                                            }
+                                            PatchData = keystone.Assemble($"b {instruction.Operand}", Offset).Buffer;
                                             break;
                                         }
                                         pos = il2cpp.Position;
                                         il2cpp.Position = newPos;
                                         il2cpp.Read(buffer, 0, bufferSize);
                                         instruction = disassembler.Disassemble(buffer, newPos).First();
+                                        if (instruction.Id == ArmInstructionId.ARM_INS_LDR && instruction.Operand == "ip, [pc]")
+                                        {
+                                            il2cpp.Read(buffer, 0, bufferSize);
+                                            instruction = disassembler.Disassemble(buffer, newPos).First();
+                                            if (instruction.Id == ArmInstructionId.ARM_INS_ADD && instruction.Operand == "pc, pc, ip")
+                                            {
+                                                il2cpp.Read(buffer, 0, bufferSize);
+                                                if (il2cpp.Position + BitConverter.ToInt32(buffer, 0) == (long)CalledMethod.Offset)
+                                                {
+                                                    il2cpp.Position = pos + 4;
+                                                    Offset = (ulong)il2cpp.Position;
+                                                    il2cpp.Read(buffer, 0, bufferSize);
+                                                    instruction = disassembler.Disassemble(buffer, (long)Offset).First();
+                                                    PatchData = keystone.Assemble($"b {instruction.Operand}", Offset).Buffer;
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                        il2cpp.Position = pos;
 
-                                        Console.WriteLine($"Moved to new position {newPos}, instruction: {instruction.Mnemonic} {instruction.Operand}");
+                                    }
+                                }
+                                while (readed < count);
+                            }
+                            break;
+                        case Architecture.ARM64:
+                            using (var disassembler2 = CapstoneDisassembler.CreateArm64Disassembler(Arm64DisassembleMode.LittleEndian))
+                            {
+                                disassembler2.EnableInstructionDetails = true;
+                                do
+                                {
+                                    var pos = il2cpp.Position;
+                                    readed += (ulong)il2cpp.Read(buffer, 0, bufferSize);
+                                    var instruction2 = disassembler2.Disassemble(buffer, pos).First();
+                                    if (instruction2.Id == Arm64InstructionId.ARM64_INS_BL)
+                                    {
+                                        var newPos = instruction2.Details.Operands.First().Immediate;
+                                        if (newPos == (long)CalledMethod.Offset)
+                                        {
+                                            Offset = (ulong)il2cpp.Position;
+                                            il2cpp.Read(buffer, 0, bufferSize);
+                                            instruction2 = disassembler2.Disassemble(buffer, (long)Offset).First();
+                                            var operand = instruction2.Operand;
+                                            try
+                                            {
+                                                PatchData = keystone.Assemble($"b {instruction2.Operand[operand.LastIndexOf('#')..]}", Offset).Buffer;
+                                            } catch (Exception ex)
+                                            {
+                                                    // Получаем имя метода из CalledMethod
+                                                    string methodName = string.Empty;
 
-                                        if (instruction.Id == Arm64InstructionId.ARM64_INS_B && instruction.Details.Operands.First().Immediate == (long)CalledMethod.Offset)
+                                                    if (CalledMethod is TextLine textLine)
+                                                    {
+                                                        methodName = textLine.Name;
+                                                    }
+                                                    else if (CalledMethod is SignatureLine signatureLine)
+                                                    {
+                                                        methodName = signatureLine.Signature;
+                                                    }
+                                                    else
+                                                    {
+                                                        methodName = "Unknown Method";
+                                                    }
+                                                    Console.WriteLine($"Error in method '{methodName}': Cannot find '#' in instruction operand '{operand}'.");
+                                                    throw new Exception($"Cannot find '#' in instruction operand '{operand}' while processing method '{methodName}'.");
+                                            }
+                                            break;
+                                        }
+                                        pos = il2cpp.Position;
+                                        il2cpp.Position = newPos;
+                                        il2cpp.Read(buffer, 0, bufferSize);
+                                        instruction2 = disassembler2.Disassemble(buffer, newPos).First();
+                                        if (instruction2.Id == Arm64InstructionId.ARM64_INS_B && instruction2.Details.Operands.First().Immediate == (long)CalledMethod.Offset)
                                         {
                                             il2cpp.Position = pos;
                                             Offset = (ulong)pos;
                                             il2cpp.Read(buffer, 0, bufferSize);
-                                            instruction = disassembler.Disassemble(buffer, (long)Offset).First();
-
-                                            Console.WriteLine($"Instruction is B pointing to CalledMethod.Offset, instruction: {instruction.Mnemonic} {instruction.Operand}");
-                                            Console.WriteLine($"Attempting to assemble branch instruction at Offset {Offset}");
-
-                                            int idx = instruction.Operand.LastIndexOf('#');
-                                            if (idx >= 0)
-                                            {
-                                                var operandSuffix = instruction.Operand.Substring(idx);
-                                                Console.WriteLine($"Operand suffix: {operandSuffix}");
-                                                PatchData = keystone.Assemble($"b {operandSuffix}", Offset).Buffer;
-                                            }
-                                            else
-                                            {
-                                                Console.WriteLine("Error: '#' not found in instruction operand.");
-                                                Console.WriteLine($"Instruction Operand: {instruction.Operand}");
-                                                throw new Exception("Cannot find '#' in instruction operand.");
-                                            }
+                                            instruction2 = disassembler2.Disassemble(buffer, (long)Offset).First();
+                                            PatchData = keystone.Assemble($"b {instruction2.Operand[instruction2.Operand.LastIndexOf('#')..]}", Offset).Buffer;
                                             break;
                                         }
                                         il2cpp.Position = pos;
