@@ -37,13 +37,13 @@ jobs:
         run: dotnet --version
 
       - name: Clean
-        run: dotnet clean ${{ env.Solution_Name }} --configuration ${{ matrix.configuration }}
+        run: dotnet clean ./Generator/Generator.csproj --configuration ${{ matrix.configuration }}
 
       - name: Restore dependencies
-        run: dotnet restore ${{ env.Solution_Name }} --runtime ${{ matrix.runtime }}
+        run: dotnet restore ./Generator/Generator.csproj --runtime ${{ matrix.runtime }}
 
       - name: Build
-        run: dotnet build ${{ env.Solution_Name }} --configuration ${{ matrix.configuration }} --runtime ${{ matrix.runtime }} --no-restore
+        run: dotnet build ./Generator/Generator.csproj --configuration ${{ matrix.configuration }} --runtime ${{ matrix.runtime }} --no-restore
 
       - name: Publish
         run: dotnet publish ./Generator/Generator.csproj --configuration ${{ matrix.configuration }} --runtime ${{ matrix.runtime }} --self-contained true --output ./publish /p:PublishSingleFile=false
