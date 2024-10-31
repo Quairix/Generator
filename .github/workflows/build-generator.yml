@@ -16,8 +16,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [windows-latest, ubuntu-latest]
-        configuration: [Release]
         include:
           - os: windows-latest
             runtime: win-x64
@@ -45,10 +43,10 @@ jobs:
         run: dotnet restore ${{ env.Solution_Name }} --runtime ${{ matrix.runtime }}
 
       - name: Build
-        run: dotnet build ${{ env.Solution_Name }} --configuration ${{ matrix.configuration }} --no-restore
+        run: dotnet build ${{ env.Solution_Name }} --configuration ${{ matrix.configuration }} --runtime ${{ matrix.runtime }} --no-restore
 
       - name: Publish
-        run: dotnet publish ./Generator/Generator.csproj --configuration ${{ matrix.configuration }} --runtime ${{ matrix.runtime }} --output ./publish /p:PublishSingleFile=false
+        run: dotnet publish ./Generator/Generator.csproj --configuration ${{ matrix.configuration }} --runtime ${{ matrix.runtime }} --self-contained true --output ./publish /p:PublishSingleFile=false
 
       # Создаем архивы
       - name: Create ZIP archive (Windows)
@@ -61,6 +59,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           tar -czvf Generator-linux-x64.tar.gz -C ./publish .
+        shell: bash
 
       # Загружаем архивы как артефакты
       - name: Upload build artifacts (Windows)
@@ -103,7 +102,7 @@ jobs:
           artifacts: |
             artifacts/win-x64/Generator-win-x64.zip
             artifacts/linux-x64/Generator-linux-x64.tar.gz
-          tag: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
+          tag: Release ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
           body: "Автоматически сгенерированный релиз для версии ${{ github.ref_name }}."
           token: ${{ github.token }}
