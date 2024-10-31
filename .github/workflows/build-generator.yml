@@ -76,33 +76,51 @@ jobs:
           name: Generator-linux-x64
           path: Generator-linux-x64.tar.gz
 
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
+release:
+  needs: build
+  runs-on: ubuntu-latest
+  if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+  steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+      with:
+        fetch-depth: 0  # Полная история для создания тегов
 
-      - name: Download Windows build artifacts
-        uses: actions/download-artifact@v3
-        with:
-          name: Generator-win-x64
-          path: ./artifacts/win-x64
+    - name: Set up Git
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Download Linux build artifacts
-        uses: actions/download-artifact@v3
-        with:
-          name: Generator-linux-x64
-          path: ./artifacts/linux-x64
+    - name: Generate Release Tag
+      id: generate_tag
+      run: |
+        TAG_NAME="v0.0.${GITHUB_RUN_NUMBER}"
+        echo "tag=${TAG_NAME}" >> $GITHUB_OUTPUT
 
-      - name: Create GitHub Release
-        uses: ncipollo/release-action@v1
-        with:
-          artifacts: |
-            artifacts/win-x64/Generator-win-x64.zip
-            artifacts/linux-x64/Generator-linux-x64.tar.gz
-          tag: Release ${{ github.ref_name }}
-          name: Release ${{ github.ref_name }}
-          body: "Автоматически сгенерированный релиз для версии ${{ github.ref_name }}."
-          token: ${{ github.token }}
+    - name: Create and Push Tag
+      run: |
+        git tag ${{ steps.generate_tag.outputs.tag }}
+        git push origin ${{ steps.generate_tag.outputs.tag }}
+
+    - name: Download Windows build artifacts
+      uses: actions/download-artifact@v3
+      with:
+        name: Generator-win-x64
+        path: ./artifacts/win-x64
+
+    - name: Download Linux build artifacts
+      uses: actions/download-artifact@v3
+      with:
+        name: Generator-linux-x64
+        path: ./artifacts/linux-x64
+
+    - name: Create GitHub Release
+      uses: ncipollo/release-action@v1
+      with:
+        artifacts: |
+          artifacts/win-x64/Generator-win-x64.zip
+          artifacts/linux-x64/Generator-linux-x64.tar.gz
+        tag: ${{ steps.generate_tag.outputs.tag }}
+        name: Release ${{ steps.generate_tag.outputs.tag }}
+        body: "Автоматически сгенерированный релиз для версии ${{ steps.generate_tag.outputs.tag }}."
+        token: ${{ github.token }}
